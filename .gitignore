@@ -1,0 +1,13 @@
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+
+# API response cache
+cache/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

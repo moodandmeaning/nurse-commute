@@ -1,0 +1,29 @@
+{
+  "timezone": "Asia/Jerusalem",
+  "language_code": "he",
+  "region_code": "IL",
+
+  "max_walk_minutes": 8,
+
+  "direct_only": true,
+  "max_transit_legs_if_not_direct": 2,
+  "max_transit_minutes": 15,
+  "transit_time_basis": "total",
+  "max_gap_minutes": 20,
+  "min_departures_per_window": 2,
+
+  "windows": [
+    {"key": "morning",   "label": "בוקר",   "time": "06:00"},
+    {"key": "afternoon", "label": "צהריים", "time": "14:00"},
+    {"key": "evening",   "label": "ערב",    "time": "22:00"},
+    {"key": "night",     "label": "לילה",   "time": "03:00"}
+  ],
+  "window_length_minutes": 60,
+  "departures_per_window": 4,
+
+  "weekdays": [6, 0, 1, 2, 3],
+  "verdict_days": ["weekday"],
+
+  "max_lines_for_frequency": 3,
+  "cache_ttl_hours": 168
+}

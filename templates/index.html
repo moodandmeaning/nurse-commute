@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>מרחק לבית החולים</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main>
+  <h1>🏥 כמה קל להגיע לעבודה?</h1>
+  <p class="sub">
+    הקריטריונים: הליכה עד {{ settings.max_walk_minutes }} דק',
+    או קו {{ 'ישיר (בלי החלפות)' if settings.direct_only else 'תחבורה ציבורית' }}
+    עד {{ settings.max_transit_minutes }} דק' עם יציאה לפחות כל {{ settings.max_gap_minutes }} דק'
+    בכל החלונות ({% for w in settings.windows %}{{ w.label }} {{ w.time }}{{ ', ' if not loop.last }}{% endfor %}).
+    <span class="muted">אפשר לשנות ב-settings.json</span>
+  </p>
+
+  <label class="field">
+    <span>בית חולים</span>
+    <input id="hospital" list="hospitals" autocomplete="off" placeholder="שם או כתובת של בית החולים">
+    <datalist id="hospitals">
+      <option value="המרכז הרפואי שיבא, תל השומר, רמת גן">
+      <option value="המרכז הרפואי תל אביב איכילוב, ויצמן 6, תל אביב">
+      <option value="המרכז הרפואי רבין בילינסון, פתח תקווה">
+      <option value="המרכז הרפואי וולפסון, חולון">
+      <option value="המרכז הרפואי שמיר אסף הרופא, באר יעקב">
+      <option value="המרכז הרפואי מאיר, כפר סבא">
+      <option value="המרכז הרפואי לניאדו, נתניה">
+      <option value="המרכז הרפואי הלל יפה, חדרה">
+      <option value="הדסה עין כרם, ירושלים">
+      <option value="הדסה הר הצופים, ירושלים">
+      <option value="שערי צדק, ירושלים">
+      <option value="רמב&quot;ם, חיפה">
+      <option value="המרכז הרפואי כרמל, חיפה">
+      <option value="המרכז הרפואי בני ציון, חיפה">
+      <option value="המרכז הרפואי העמק, עפולה">
+      <option value="המרכז הרפואי קפלן, רחובות">
+      <option value="המרכז הרפואי ברזילי, אשקלון">
+      <option value="אסותא אשדוד">
+      <option value="המרכז הרפואי סורוקה, באר שבע">
+      <option value="המרכז הרפואי גליל, נהריה">
+      <option value="המרכז הרפואי זיו, צפת">
+    </datalist>
+  </label>
+
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-tab="single" role="tab">דירה אחת</button>
+    <button class="tab" data-tab="csv" role="tab">קובץ CSV</button>
+  </div>
+
+  <section id="tab-single">
+    <form id="single-form">
+      <label class="field">
+        <span>כתובת הדירה</span>
+        <input id="address" autocomplete="street-address" placeholder="לדוגמה: הרצל 10, רמת גן" required>
+      </label>
+      <button type="submit" class="primary">בדיקה</button>
+    </form>
+    <div id="single-result"></div>
+  </section>
+
+  <section id="tab-csv" hidden>
+    <p class="muted">קובץ עם העמודות: <code>address, price, link</code></p>
+    <form id="csv-form">
+      <input type="file" id="csv-file" accept=".csv,text/csv" required>
+      <button type="submit" class="primary">בדיקת כל הדירות</button>
+    </form>
+    <div id="csv-progress"></div>
+    <div id="csv-result"></div>
+  </section>
+
+  <p class="warning">⚠️ זמן ההליכה מחושב לכתובת הרשמית של בית החולים. כדאי לבדוק איפה נמצאת כניסת הצוות.</p>
+</main>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
