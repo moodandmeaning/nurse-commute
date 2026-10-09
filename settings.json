@@ -22,7 +22,21 @@
   "departures_per_window": 4,
 
   "weekdays": [6, 0, 1, 2, 3],
-  "verdict_days": ["weekday"],
+
+  "shabbat": {
+    "start_day": 4,
+    "start_time": "14:00",
+    "end_day": 5,
+    "end_time": "21:00"
+  },
+
+  "friday_info": {
+    "enabled": true,
+    "windows": [
+      {"key": "fri_06", "label": "שישי בוקר", "time": "06:00"},
+      {"key": "fri_10", "label": "שישי 10:00", "time": "10:00"}
+    ]
+  },
 
   "max_lines_for_frequency": 3,
   "cache_ttl_hours": 168

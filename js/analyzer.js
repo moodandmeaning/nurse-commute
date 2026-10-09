@@ -8,7 +8,8 @@ export const VEHICLE_HE = {
   COMMUTER_TRAIN: "רכבת", HIGH_SPEED_TRAIN: "רכבת", RAIL: "רכבת",
   CABLE_CAR: "רכבל", FERRY: "מעבורת",
 };
-export const DAY_LABELS = { weekday: "יום חול", saturday: "שבת" };
+export const DAY_LABELS = { weekday: "יום חול", friday: "שישי" };
+export const SHABBAT_NOTE = "לא נבדקה תחבורה ציבורית בשבת";
 export const NO_DIRECT_MSG = "אין קו ישיר מהכתובת הזו";
 export const NO_TRANSIT_MSG = "לא נמצאו תוצאות תחבורה ציבורית בין הכתובות";
 export const WALK_WARNING = "זמן ההליכה מחושב לכתובת הרשמית של בית החולים. כדאי לבדוק איפה נמצאת כניסת הצוות.";
@@ -62,18 +63,44 @@ export const hhmm = (ms, tz) => {
   return `${String(p.h).padStart(2, "0")}:${String(p.mi).padStart(2, "0")}`;
 };
 
-/** Next weekday (settings.weekdays, Python numbering Mon=0..Sun=6) and next Saturday, after today. */
+const toMinutes = (hhmmText) => { const [h, m] = hhmmText.split(":").map(Number); return h * 60 + m; };
+const FRIDAY = 4; // Python numbering, Mon=0..Sun=6
+
+/** Shabbat as [start, end) in minutes since Monday 00:00 (default Fri 14:00 -> Sat 21:00). */
+export function shabbatRange(settings) {
+  const s = settings.shabbat;
+  return [s.start_day * 1440 + toMinutes(s.start_time), s.end_day * 1440 + toMinutes(s.end_time)];
+}
+
+const inRange = (x, [a, b]) => (a <= b ? x >= a && x < b : x >= a || x < b);
+
+/** True if this instant falls in Shabbat (no public transit; never checked or counted). */
+export function isShabbat(ms, settings) {
+  const p = tzParts(ms, settings.timezone);
+  const wd = (new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay() + 6) % 7;
+  return inRange(wd * 1440 + p.h * 60 + p.mi, shabbatRange(settings));
+}
+
+/** Regular weekdays: settings.weekdays minus any day that touches Shabbat. */
+export function regularWeekdays(settings) {
+  const [a, b] = shabbatRange(settings);
+  return settings.weekdays.filter((d) => !(inRange(d * 1440, [a, b]) || inRange(d * 1440 + 1439, [a, b]) ||
+    (a >= d * 1440 && a < (d + 1) * 1440)));
+}
+
+/** Next regular weekday (Sun-Thu by default) and next Friday, both after today. */
 export function targetDates(nowMs, settings) {
   const p = tzParts(nowMs, settings.timezone);
   const base = Date.UTC(p.y, p.m - 1, p.d);
+  const weekdays = regularWeekdays(settings);
   const find = (ok) => {
     for (let i = 1; i <= 14; i++) {
       const dt = new Date(base + i * 864e5);
       if (ok((dt.getUTCDay() + 6) % 7)) return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
     }
-    throw new Error("settings.weekdays is empty");
+    throw new Error("no regular weekday in settings.weekdays");
   };
-  return { weekday: find((wd) => settings.weekdays.includes(wd)), saturday: find((wd) => wd === 5) };
+  return { weekday: find((wd) => weekdays.includes(wd)), friday: find((wd) => wd === FRIDAY) };
 }
 
 export function windowStart(day, time, tz) {
@@ -150,9 +177,11 @@ export async function sampleWindow(client, apartment, hospital, key, start, sett
   const found = new Map();
   let t = start;
   for (let i = 0; i < wanted; i++) {
+    if (isShabbat(t, settings)) break; // never query or count Shabbat
     const resp = await client.transit(apartment, hospital, rfc3339(t));
     const matches = routeOptions(resp, settings)
-      .filter((o) => o.key === key && o.departure >= t && o.departure <= end && !found.has(o.departure))
+      .filter((o) => o.key === key && o.departure >= t && o.departure <= end && !found.has(o.departure) &&
+                     !isShabbat(o.departure, settings))
       .sort((a, b) => a.departure - b.departure);
     if (!matches.length) break;
     for (const o of matches) { // alternatives can already include several departures of the line
@@ -225,7 +254,9 @@ export async function analyze(client, apartment, entrances, settings, nowMs = Da
     dates: r.dates,
     day_labels: DAY_LABELS,
     windows: r.windows,
+    friday_windows: r.friday_windows,
     warning: WALK_WARNING,
+    shabbat_note: SHABBAT_NOTE,
   };
 }
 
@@ -240,10 +271,14 @@ export async function analyzeDestination(client, apartment, hospital, settings, 
   const walkMin = minutesUp(seconds(w.duration));
   const walk = { minutes: walkMin, distance_m: w.distanceMeters || 0, ok: walkMin <= settings.max_walk_minutes };
 
-  // B. discover direct lines: first query of every window on both days (in parallel)
+  // B. discover direct lines: first query of every weekday window (in parallel). Shabbat is never checked.
   const days = targetDates(nowMs, settings);
-  const slots = Object.entries(days).flatMap(([dayKey, day]) =>
-    settings.windows.map((win) => ({ dayKey, win, start: windowStart(day, win.time, tz) })));
+  const slots = settings.windows.map((win) => ({ win, start: windowStart(days.weekday, win.time, tz) }))
+    .filter((s) => !isShabbat(s.start, settings));
+  const fridaySlots = settings.friday_info && settings.friday_info.enabled
+    ? settings.friday_info.windows.map((win) => ({ win, start: windowStart(days.friday, win.time, tz) }))
+      .filter((s) => !isShabbat(s.start, settings))
+    : [];
   const firstResponses = await Promise.all(slots.map((s) => client.transit(apartment, hospital, rfc3339(s.start))));
   const anyTransit = firstResponses.some((r) => (r.routes || []).length);
   const lines = new Map();
@@ -252,12 +287,13 @@ export async function analyzeDestination(client, apartment, hospital, settings, 
   }
   const checked = [...lines.values()].sort((a, b) => a.total_sec - b.total_sec).slice(0, settings.max_lines_for_frequency);
 
-  // C. frequency per line, per window, per day
+  // C. frequency per line: weekday windows (count for the verdict) + Friday morning (informational only)
   const options = await Promise.all(checked.map(async (o) => {
-    const results = await Promise.all(slots.map((s) => sampleWindow(client, apartment, hospital, o.key, s.start, settings)));
-    const freq = {};
-    slots.forEach((s, i) => { (freq[s.dayKey] ||= {})[s.win.key] = results[i]; });
-    const meets = settings.verdict_days.every((d) => settings.windows.every((win) => freq[d][win.key].ok));
+    const sample = (list) => Promise.all(list.map((s) => sampleWindow(client, apartment, hospital, o.key, s.start, settings)));
+    const [results, fridayResults] = await Promise.all([sample(slots), sample(fridaySlots)]);
+    const freq = { weekday: Object.fromEntries(slots.map((s, i) => [s.win.key, results[i]])) };
+    const fridayInfo = Object.fromEntries(fridaySlots.map((s, i) => [s.win.key, fridayResults[i]]));
+    const meets = slots.every((s) => freq.weekday[s.win.key].ok);
     return {
       key: o.key,
       legs: o.legs.map(({ departure, arrival, ...rest }) => rest),
@@ -267,6 +303,7 @@ export async function analyzeDestination(client, apartment, hospital, settings, 
       in_vehicle_min: minutesUp(o.in_vehicle_sec),
       total_min: minutesUp(o.total_sec),
       frequency: freq,
+      friday_info: fridayInfo,
       meets_criteria: meets,
     };
   }));
@@ -284,8 +321,10 @@ export async function analyzeDestination(client, apartment, hospital, settings, 
     best_minutes: Math.min(walkMin, ...options.map((o) => o.total_min)),
     dates: Object.fromEntries(Object.entries(days).map(([k, d]) => [k, fmtDate(d)])),
     day_labels: DAY_LABELS,
-    windows: settings.windows.map(({ key, label, time }) => ({ key, label, time })),
+    windows: slots.map(({ win: { key, label, time } }) => ({ key, label, time })),
+    friday_windows: fridaySlots.map(({ win: { key, label, time } }) => ({ key, label, time })),
     warning: WALK_WARNING,
+    shabbat_note: SHABBAT_NOTE,
   };
 }
 
@@ -300,10 +339,10 @@ export function makeVerdict(walk, options, goodLines, settings) {
   }
   if (!options.length) return `❌ לא מתאימה: ${walk.minutes} דקות הליכה ו${NO_DIRECT_MSG}`;
 
-  const labels = Object.fromEntries(settings.windows.map((w) => [w.key, w.label]));
-  const failing = (o) => settings.verdict_days.flatMap((d) => settings.windows
-    .filter((w) => !o.frequency[d][w.key].ok)
-    .map((w) => labels[w.key] + (settings.verdict_days.length > 1 ? ` (${DAY_LABELS[d]})` : "")));
+  // Weekday windows only: Shabbat never makes a line "not suitable".
+  const failing = (o) => settings.windows
+    .filter((w) => o.frequency.weekday[w.key] && !o.frequency.weekday[w.key].ok)
+    .map((w) => w.label);
   const closest = options.reduce((a, b) => (failing(b).length < failing(a).length ? b : a));
   return `❌ לא מתאימה: ${walk.minutes} דקות הליכה, והקו הקרוב ביותר (${names(closest)}) לא עומד בדרישות ` +
     `(עד ${settings.max_transit_minutes} דק', כל ${settings.max_gap_minutes} דק') בחלונות: ${failing(closest).join(", ")}`;

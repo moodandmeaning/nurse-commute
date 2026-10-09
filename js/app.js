@@ -1,4 +1,4 @@
-import { analyze } from "./analyzer.js";
+import { analyze, SHABBAT_NOTE } from "./analyzer.js";
 import { cacheClear } from "./cache.js";
 import { decodeBytes, exportCsv, readApartments } from "./csv.js";
 import { resolveLocation, validateState } from "./locations.js";
@@ -325,7 +325,8 @@ $("single-form").addEventListener("submit", async (ev) => {
 });
 
 function renderResult(r) {
-  let html = `<div class="card verdict ${r.suitable ? "ok" : "bad"}">${esc(r.verdict)}</div>`;
+  let html = `<div class="card verdict ${r.suitable ? "ok" : "bad"}">${esc(r.verdict)}</div>
+    <p class="note">🕯️ ${esc(r.shabbat_note)}</p>`;
   for (const item of r.entrances) {
     const e = item.entrance, res = item.result;
     const isBest = e.id === r.best_entrance_id;
@@ -388,7 +389,24 @@ function renderOption(o, r) {
     }
     html += `</tr>`;
   }
-  return html + `</tbody></table></div></div>`;
+  html += `</tbody></table></div>`;
+  html += renderFridayInfo(o, r);
+  return html + `</div>`;
+}
+
+/** Friday morning: informational only, never part of the verdict. */
+function renderFridayInfo(o, r) {
+  if (!r.friday_windows || !r.friday_windows.length) return "";
+  const rows = r.friday_windows.map((win) => {
+    const f = o.friday_info[win.key];
+    const detail = f.count
+      ? `<span class="times">${f.departures.map(esc).join(" · ")}</span>${f.avg_gap != null ? ` · כל ~${f.avg_gap} דק'` : ""}`
+      : "אין יציאות";
+    return `<div><b>${esc(win.label)}</b> <span class="muted">${esc(win.time)}</span>: ${detail}</div>`;
+  }).join("");
+  return `<div class="info-block">
+    <div class="muted">שישי ${esc(r.dates.friday)}, לידיעה בלבד (לא משפיע על ההחלטה)</div>${rows}
+  </div>`;
 }
 
 // =====================================================================
@@ -453,6 +471,7 @@ function renderCsvTable() {
   $("csv-result").innerHTML = `<div class="card">
     <div class="row-actions"><h2>תוצאות (${rows.filter((r) => r.suitable).length} מתאימות מתוך ${rows.length})</h2>
       <button class="secondary" id="csv-download">⬇️ הורדת CSV</button></div>
+    <p class="note">🕯️ ${esc(SHABBAT_NOTE)} · נבדקו ימים א'–ה' בלבד</p>
     <div class="table-wrap"><table>
       <thead><tr><th>כתובת</th><th>מחיר</th><th>הליכה</th><th>קו ישיר</th><th>זמן מיטבי</th>${multi ? "<th>כניסה</th>" : ""}<th>התאמה</th></tr></thead>
       <tbody>${rows.map((r) => {
@@ -479,7 +498,7 @@ function renderCriteria() {
   const s = settings;
   $("criteria").innerHTML = `הקריטריונים: הליכה עד ${s.max_walk_minutes} דק', או קו ${s.direct_only ? "ישיר (בלי החלפות)" : "תחבורה ציבורית"}
     עד ${s.max_transit_minutes} דק' עם יציאה לפחות כל ${s.max_gap_minutes} דק' בכל החלונות
-    (${s.windows.map((w) => `${esc(w.label)} ${esc(w.time)}`).join(", ")}).`;
+    (${s.windows.map((w) => `${esc(w.label)} ${esc(w.time)}`).join(", ")}) בימים א'–ה'. שבת לא נבדקת.`;
 }
 
 async function init() {

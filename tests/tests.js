@@ -25,6 +25,8 @@ const TZ = "Asia/Jerusalem";
 const NOW = A.zonedToMs(2026, 10, 9, 12, 0, TZ); // Friday
 const SHEBA = { lat: 32.0461, lng: 34.8516 };
 const MIN = 60000;
+const pyWeekday = (ms) => { const p = A.tzParts(ms, TZ); return (new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay() + 6) % 7; };
+const SUN_THU = new Set([6, 0, 1, 2, 3]);
 
 // ---- fake Google client ---------------------------------------------------------
 const step = (mode, secs, td) => ({ travelMode: mode, staticDuration: `${secs}s`, ...(td ? { transitDetails: td } : {}) });
@@ -41,8 +43,8 @@ const transitStep = (line, dep, rideMin, operator = "דן") => step("TRANSIT", r
 /** Line departs every `headway` minutes (aligned to local midnight + offset). */
 class FakeClient {
   constructor({ walkMin = 20, headway = 10, ride = 8, walkTo = 3, walkFrom = 2, line = "5",
-                direct = true, transit = true, offset = 1, activeHours = null } = {}) {
-    Object.assign(this, { walkMin, headway, ride, walkTo, walkFrom, line, direct, hasTransit: transit, offset, activeHours });
+                direct = true, transit = true, offset = 1, activeHours = null, activeDays = null } = {}) {
+    Object.assign(this, { walkMin, headway, ride, walkTo, walkFrom, line, direct, hasTransit: transit, offset, activeHours, activeDays });
     this.calls = []; this.apiCalls = 0; this.cacheHits = 0;
   }
   async walk() {
@@ -55,7 +57,9 @@ class FakeClient {
     const mins = (earliest - midnight) / MIN;
     const k = Math.max(0, Math.ceil((mins - this.offset) / this.headway));
     let dep = midnight + (this.offset + k * this.headway) * MIN;
-    while (this.activeHours && !this.activeHours.has(A.tzParts(dep, TZ).h)) dep += this.headway * MIN;
+    const runs = (ms) => (!this.activeHours || this.activeHours.has(A.tzParts(ms, TZ).h)) &&
+                         (!this.activeDays || this.activeDays.has(pyWeekday(ms)));
+    for (let i = 0; i < 2000 && !runs(dep); i++) dep += this.headway * MIN;
     return dep;
   }
   async transit(o, d, t) {
@@ -80,10 +84,28 @@ const MAIN = { id: "m", label: "כניסה ראשית", lat: 32.0461, lng: 34.85
 const STAFF = { id: "s", label: "כניסת צוות", lat: 32.04, lng: 34.86, main: false };
 
 // ---- time handling ------------------------------------------------------------------
-test("dates are next Sunday and Saturday", () => {
-  const d = A.targetDates(NOW, SETTINGS);
-  eq(d.weekday, { y: 2026, m: 10, d: 11 });
-  eq(d.saturday, { y: 2026, m: 10, d: 10 });
+test("dates are the next regular weekday and next Friday", () => {
+  const d = A.targetDates(NOW, SETTINGS); // NOW is Friday 9/10
+  eq(d.weekday, { y: 2026, m: 10, d: 11 }); // Sunday
+  eq(d.friday, { y: 2026, m: 10, d: 16 });
+  const thu = A.zonedToMs(2026, 10, 8, 12, 0, TZ);
+  eq(A.targetDates(thu, SETTINGS).weekday, { y: 2026, m: 10, d: 11 }, "Thursday -> Sunday, skipping Fri/Sat");
+});
+
+test("Shabbat boundaries (Fri 14:00 to Sat 21:00) and custom times", () => {
+  const at = (d, h, m) => A.isShabbat(A.zonedToMs(2026, 10, d, h, m, TZ), SETTINGS);
+  eq([at(9, 13, 59), at(9, 14, 0), at(10, 3, 0), at(10, 20, 59), at(10, 21, 0), at(11, 3, 0)],
+     [false, true, true, true, false, false]);
+  const later = { ...SETTINGS, shabbat: { ...SETTINGS.shabbat, start_time: "16:00", end_time: "19:30" } };
+  eq([A.isShabbat(A.zonedToMs(2026, 10, 9, 15, 0, TZ), later), A.isShabbat(A.zonedToMs(2026, 10, 10, 20, 0, TZ), later)],
+     [false, false]);
+});
+
+test("weekdays setting that includes Friday/Saturday is ignored", () => {
+  const s = { ...SETTINGS, weekdays: [4, 5, 6, 0, 1, 2, 3] };
+  eq(A.regularWeekdays(s), [6, 0, 1, 2, 3]);
+  const thu = A.zonedToMs(2026, 10, 8, 12, 0, TZ);
+  eq(A.targetDates(thu, s).weekday, { y: 2026, m: 10, d: 11 });
 });
 
 test("zoned times are Israel time (summer and winter)", () => {
@@ -162,9 +184,56 @@ test("no transit at all", async () => {
   assert(!r.suitable);
 });
 
-test("Saturday is reported but not in the default verdict", async () => {
+test("Shabbat is never queried", async () => {
+  for (const now of [NOW, A.zonedToMs(2026, 10, 8, 23, 0, TZ), A.zonedToMs(2026, 10, 10, 22, 0, TZ)]) {
+    const c = new FakeClient({ walkMin: 20, headway: 10 });
+    await A.analyzeDestination(c, "x", SHEBA, SETTINGS, now);
+    const bad = c.calls.filter((t) => A.isShabbat(Date.parse(t), SETTINGS) || pyWeekday(Date.parse(t)) === 5);
+    eq(bad, [], "calls during Shabbat");
+    assert(c.calls.length > 0);
+  }
+});
+
+test("only weekday windows in frequency; Shabbat note present", async () => {
   const r = await run(new FakeClient({ walkMin: 20, headway: 10 }));
-  eq(Object.keys(r.options[0].frequency).sort(), ["saturday", "weekday"]);
+  eq(Object.keys(r.options[0].frequency), ["weekday"]);
+  eq(r.shabbat_note, "לא נבדקה תחבורה ציבורית בשבת");
+  eq(r.windows.map((w) => w.key), ["morning", "afternoon", "evening", "night"]);
+});
+
+test("line with no Friday/Shabbat service is still suitable", async () => {
+  const r = await run(new FakeClient({ walkMin: 20, headway: 10, activeDays: SUN_THU }));
+  assert(r.suitable, r.verdict);
+  const fri = r.options[0].friday_info;
+  eq(Object.keys(fri), ["fri_06", "fri_10"]);
+  eq([fri.fri_06.count, fri.fri_10.count], [0, 0]);
+  assert(!r.verdict.includes("שישי") && !r.verdict.includes("שבת"), r.verdict);
+});
+
+test("Friday info is shown but never changes the verdict", async () => {
+  const off = await run(new FakeClient({ walkMin: 20, headway: 10 }), { ...SETTINGS, friday_info: { enabled: false, windows: [] } });
+  const on = await run(new FakeClient({ walkMin: 20, headway: 10 }));
+  eq([on.suitable, on.verdict], [off.suitable, off.verdict]);
+  eq(on.options[0].friday_info.fri_06.departures, ["06:11", "06:21", "06:31", "06:41"]);
+  eq(off.friday_windows, []);
+});
+
+test("a line that runs only on Friday is not suitable", async () => {
+  const r = await run(new FakeClient({ walkMin: 20, headway: 10, activeDays: new Set([4]) }));
+  assert(!r.suitable, r.verdict);
+});
+
+test("Friday window running into Shabbat stops at Shabbat start", async () => {
+  const s = { ...SETTINGS, friday_info: { enabled: true, windows: [{ key: "fri_1330", label: "x", time: "13:30" }] } };
+  const r = await run(new FakeClient({ walkMin: 20, headway: 10 }), s);
+  eq(r.options[0].friday_info.fri_1330.departures, ["13:41", "13:51"]);
+});
+
+test("CSV path (analyze) uses weekdays only", async () => {
+  const c = new FakeClient({ walkMin: 20, headway: 10, activeDays: SUN_THU });
+  const r = await A.analyze(c, "x", [MAIN], SETTINGS, NOW);
+  assert(r.suitable);
+  eq(r.shabbat_note, "לא נבדקה תחבורה ציבורית בשבת");
 });
 
 test("apartment not found -> address_not_found", async () => {
