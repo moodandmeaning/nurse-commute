@@ -183,6 +183,11 @@ def test_error_mapping():
     assert e.code == "address_not_found"
     e = _error_from_response(FakeResp(403, {"error": {"status": "PERMISSION_DENIED", "message": "x"}}))
     assert e.code == "auth"
+    # real Google response shape for a bad key
+    e = _error_from_response(FakeResp(400, {"error": {
+        "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT",
+        "details": [{"reason": "API_KEY_INVALID"}]}}))
+    assert e.code == "auth"
 
 
 def test_cache_avoids_repeat_calls(tmp_path, monkeypatch):

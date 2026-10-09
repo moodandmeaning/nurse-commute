@@ -101,7 +101,9 @@ def _error_from_response(resp):
     msg = (err.get("message") or "").lower()
     status = err.get("status", "")
 
-    if resp.status_code in (401, 403) or status in ("PERMISSION_DENIED", "UNAUTHENTICATED"):
+    reasons = {d.get("reason") for d in err.get("details", []) if isinstance(d, dict)}
+    if (resp.status_code in (401, 403) or status in ("PERMISSION_DENIED", "UNAUTHENTICATED")
+            or "API_KEY_INVALID" in reasons or "api key" in msg):
         return RoutesError(
             "מפתח ה-API נדחה. יש לוודא שהמפתח נכון ושה-Routes API מופעל בפרויקט (ראו README).",
             "auth")
