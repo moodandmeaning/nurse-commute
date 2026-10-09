@@ -17,33 +17,45 @@
     <span class="muted">אפשר לשנות ב-settings.json</span>
   </p>
 
-  <label class="field">
-    <span>בית חולים</span>
-    <input id="hospital" list="hospitals" autocomplete="off" placeholder="שם או כתובת של בית החולים">
-    <datalist id="hospitals">
-      <option value="המרכז הרפואי שיבא, תל השומר, רמת גן">
-      <option value="המרכז הרפואי תל אביב איכילוב, ויצמן 6, תל אביב">
-      <option value="המרכז הרפואי רבין בילינסון, פתח תקווה">
-      <option value="המרכז הרפואי וולפסון, חולון">
-      <option value="המרכז הרפואי שמיר אסף הרופא, באר יעקב">
-      <option value="המרכז הרפואי מאיר, כפר סבא">
-      <option value="המרכז הרפואי לניאדו, נתניה">
-      <option value="המרכז הרפואי הלל יפה, חדרה">
-      <option value="הדסה עין כרם, ירושלים">
-      <option value="הדסה הר הצופים, ירושלים">
-      <option value="שערי צדק, ירושלים">
-      <option value="רמב&quot;ם, חיפה">
-      <option value="המרכז הרפואי כרמל, חיפה">
-      <option value="המרכז הרפואי בני ציון, חיפה">
-      <option value="המרכז הרפואי העמק, עפולה">
-      <option value="המרכז הרפואי קפלן, רחובות">
-      <option value="המרכז הרפואי ברזילי, אשקלון">
-      <option value="אסותא אשדוד">
-      <option value="המרכז הרפואי סורוקה, באר שבע">
-      <option value="המרכז הרפואי גליל, נהריה">
-      <option value="המרכז הרפואי זיו, צפת">
-    </datalist>
-  </label>
+  <section class="card" id="hospital-section">
+    <h2>🏥 בית החולים והכניסות</h2>
+    <div id="hospital-setup" hidden>
+      <label class="field">
+        <span>שם או כתובת בית החולים</span>
+        <input id="hospital" list="hospitals" autocomplete="off" placeholder="לדוגמה: המרכז הרפואי שיבא">
+        <datalist id="hospitals">
+          <option value="המרכז הרפואי שיבא, תל השומר, רמת גן">
+          <option value="המרכז הרפואי תל אביב איכילוב, ויצמן 6, תל אביב">
+          <option value="המרכז הרפואי רבין בילינסון, פתח תקווה">
+          <option value="המרכז הרפואי וולפסון, חולון">
+          <option value="המרכז הרפואי שמיר אסף הרופא, באר יעקב">
+          <option value="המרכז הרפואי מאיר, כפר סבא">
+          <option value="המרכז הרפואי לניאדו, נתניה">
+          <option value="המרכז הרפואי הלל יפה, חדרה">
+          <option value="הדסה עין כרם, ירושלים">
+          <option value="הדסה הר הצופים, ירושלים">
+          <option value="שערי צדק, ירושלים">
+          <option value="רמב&quot;ם, חיפה">
+          <option value="המרכז הרפואי כרמל, חיפה">
+          <option value="המרכז הרפואי בני ציון, חיפה">
+          <option value="המרכז הרפואי העמק, עפולה">
+          <option value="המרכז הרפואי קפלן, רחובות">
+          <option value="המרכז הרפואי ברזילי, אשקלון">
+          <option value="אסותא אשדוד">
+          <option value="המרכז הרפואי סורוקה, באר שבע">
+          <option value="המרכז הרפואי גליל, נהריה">
+          <option value="המרכז הרפואי זיו, צפת">
+        </datalist>
+      </label>
+      <button type="button" class="primary" id="hospital-save">שמירה ככניסה ראשית</button>
+      <div id="hospital-error"></div>
+    </div>
+    <ul id="entrance-list" class="entrances"></ul>
+    <div class="row-actions">
+      <button type="button" class="secondary" id="add-entrance">➕ הוספת כניסה</button>
+      <span id="entrance-status" class="muted"></span>
+    </div>
+  </section>
 
   <div class="tabs" role="tablist">
     <button class="tab active" data-tab="single" role="tab">דירה אחת</button>
@@ -73,6 +85,43 @@
 
   <p class="warning">⚠️ זמן ההליכה מחושב לכתובת הרשמית של בית החולים. כדאי לבדוק איפה נמצאת כניסת הצוות.</p>
 </main>
+<dialog id="entrance-dialog">
+  <form id="entrance-form">
+    <h2 id="editor-title">כניסה חדשה</h2>
+    <label class="field">
+      <span>שם הכניסה</span>
+      <input id="ent-label" placeholder="לדוגמה: כניסת צוות" required maxlength="80">
+    </label>
+    <div class="seg" role="tablist">
+      <button type="button" data-mode="address">כתובת / תיאור</button>
+      <button type="button" data-mode="map">סיכה במפה</button>
+      <button type="button" data-mode="paste">קואורדינטות / קישור</button>
+    </div>
+    <div class="panel" data-panel="address">
+      <div class="inline">
+        <input id="ent-address" placeholder="כתובת או תיאור, לדוגמה: שיבא כניסה מזרחית">
+        <button type="button" class="secondary" id="ent-address-go">חיפוש</button>
+      </div>
+    </div>
+    <div class="panel" data-panel="map">
+      <div id="map"></div>
+      <p class="muted">לחיצה על המפה מציבה סיכה, ואפשר לגרור אותה. כדאי לעבור לתצוגת לוויין כדי לזהות את הכניסה.</p>
+    </div>
+    <div class="panel" data-panel="paste">
+      <div class="inline">
+        <input id="ent-paste" dir="ltr" placeholder="32.0461, 34.8516  או  https://maps.app.goo.gl/...">
+        <button type="button" class="secondary" id="ent-paste-go">זיהוי</button>
+      </div>
+    </div>
+    <div id="ent-found"></div>
+    <div id="ent-error"></div>
+    <div class="dialog-actions">
+      <button type="button" class="secondary" id="ent-cancel">ביטול</button>
+      <button type="submit" class="primary" id="ent-save" disabled>שמירה</button>
+    </div>
+  </form>
+</dialog>
+<script>window.MAPS_BROWSER_KEY = {{ maps_browser_key | tojson }};</script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

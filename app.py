@@ -8,12 +8,14 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 
 from analyzer import analyze
+from locations import EntranceStore, resolve_location, validate_entrance
 from routes_client import RoutesClient, RoutesError
 
 BASE = Path(__file__).parent
 load_dotenv(BASE / ".env")
 
 app = Flask(__name__)
+store = EntranceStore(BASE / "data" / "entrances.json")
 
 CSV_ALIASES = {
     "address": ("address", "כתובת"),
@@ -37,9 +39,39 @@ def make_client(settings):
     )
 
 
+def error(e, status=400):
+    return jsonify({"error": e.message_he, "code": e.code}), status
+
+
 @app.get("/")
 def index():
-    return render_template("index.html", settings=load_settings())
+    # The map runs in the browser, so it needs a key the browser can see.
+    # Prefer a separate key restricted to HTTP referrers (see README).
+    browser_key = (os.environ.get("GOOGLE_MAPS_BROWSER_KEY") or os.environ.get("GOOGLE_MAPS_API_KEY", "")).strip()
+    return render_template("index.html", settings=load_settings(), maps_browser_key=browser_key)
+
+
+@app.get("/api/entrances")
+def api_entrances_get():
+    return jsonify(store.load())
+
+
+@app.put("/api/entrances")
+def api_entrances_put():
+    try:
+        return jsonify(store.save(request.get_json(silent=True)))
+    except RoutesError as e:
+        return error(e)
+
+
+@app.post("/api/resolve-location")
+def api_resolve_location():
+    data = request.get_json(silent=True) or {}
+    settings = load_settings()
+    try:
+        return jsonify(resolve_location(data.get("text"), make_client(settings)))
+    except RoutesError as e:
+        return error(e)
 
 
 @app.post("/api/check")
@@ -48,9 +80,10 @@ def api_check():
     settings = load_settings()
     client = make_client(settings)
     try:
-        result = analyze(client, data.get("address"), data.get("hospital"), settings)
+        entrances = [validate_entrance(e) for e in (data.get("entrances") or [])]
+        result = analyze(client, data.get("address"), entrances, settings)
     except RoutesError as e:
-        return jsonify({"error": e.message_he, "code": e.code}), 400
+        return error(e)
     result["api_calls"], result["cache_hits"] = client.api_calls, client.cache_hits
     return jsonify(result)
 
@@ -93,12 +126,12 @@ def api_csv_export():
     rows = (request.get_json(silent=True) or {}).get("rows", [])
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["address", "price", "link", "suitable", "best_minutes", "walk_minutes",
-                "direct_lines", "verdict"])
+    w.writerow(["address", "price", "link", "suitable", "best_minutes", "best_entrance",
+                "walk_minutes", "direct_lines", "verdict"])
     for r in rows:
         w.writerow([r.get("address", ""), r.get("price", ""), r.get("link", ""),
                     {True: "מתאימה", False: "לא מתאימה"}.get(r.get("suitable"), "שגיאה"),
-                    r.get("best_minutes", ""), r.get("walk_minutes", ""),
+                    r.get("best_minutes", ""), r.get("best_entrance", ""), r.get("walk_minutes", ""),
                     r.get("direct_lines", ""), r.get("verdict", "")])
     # BOM so Excel shows Hebrew correctly
     return Response("﻿" + out.getvalue(), mimetype="text/csv; charset=utf-8",

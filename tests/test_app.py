@@ -84,8 +84,11 @@ class FakeClient:
         return {"routes": routes}
 
 
+SHEBA = {"lat": 32.0461, "lng": 34.8516}
+
+
 def run(client, settings=SETTINGS):
-    return analyzer.analyze(client, "הרצל 10, רמת גן", "שיבא", settings, now=NOW)
+    return analyzer.analyze_destination(client, "הרצל 10, רמת גן", SHEBA, settings, now=NOW)
 
 
 def test_dates_are_next_sunday_and_saturday():
@@ -160,8 +163,9 @@ def test_no_transit_at_all():
 
 
 def test_address_not_found():
+    entrances = [dict(SHEBA, id="m", label="ראשית", main=True)]
     with pytest.raises(RoutesError) as e:
-        run(FakeClient(walk_min=None))
+        analyzer.analyze(FakeClient(walk_min=None), "כתובת", entrances, SETTINGS, now=NOW)
     assert e.value.code == "address_not_found"
 
 
@@ -222,14 +226,23 @@ def test_check_without_key_gives_hebrew_error(http, monkeypatch):
     monkeypatch.setenv("GOOGLE_MAPS_API_KEY", "")
     monkeypatch.setattr(webapp, "make_client",
                         lambda s: RoutesClient("", cache_dir=Path("nonexistent_cache_dir")))
-    r = http.post("/api/check", json={"address": "רחוב לא קיים 1", "hospital": "שיבא"})
+    r = http.post("/api/check", json={"address": "רחוב לא קיים 1",
+                                      "entrances": [dict(SHEBA, id="m", label="x")]})
     assert r.status_code == 400 and "מפתח API" in r.get_json()["error"]
 
 
 def test_check_endpoint_with_fake_client(http, monkeypatch):
     monkeypatch.setattr(webapp, "make_client", lambda s: FakeClient(walk_min=5))
-    r = http.post("/api/check", json={"address": "הרצל 10", "hospital": "שיבא"})
-    assert r.status_code == 200 and r.get_json()["suitable"] is True
+    ent = [dict(SHEBA, id="m", label="כניסה ראשית", main=True, source="address")]
+    r = http.post("/api/check", json={"address": "הרצל 10", "entrances": ent})
+    body = r.get_json()
+    assert r.status_code == 200 and body["suitable"] is True
+    assert body["best_entrance_label"] == "כניסה ראשית"
+
+
+def test_check_requires_entrances(http):
+    r = http.post("/api/check", json={"address": "הרצל 10", "entrances": []})
+    assert r.status_code == 400 and "כניסה" in r.get_json()["error"]
 
 
 def test_csv_parse_hebrew_headers_cp1255(http):

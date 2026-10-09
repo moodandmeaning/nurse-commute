@@ -59,3 +59,32 @@ td.ok { color: var(--ok); } td.bad { color: var(--bad); }
 .progress > div { height: 100%; background: var(--primary); transition: width .2s; }
 a { color: var(--primary); }
 .row-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---- entrances ---- */
+.entrances { list-style: none; padding: 0; margin: 8px 0; }
+.entrance { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.entrance .coords { direction: ltr; unicode-bidi: isolate; font-variant-numeric: tabular-nums; }
+.entrance .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.link-btn { background: none; border: 0; padding: 4px 0; color: var(--primary); font-weight: 600; }
+.link-btn.danger { color: var(--bad); }
+input.inline-input, .inline input { flex: 1; min-width: 0; }
+.inline { display: flex; gap: 8px; align-items: stretch; }
+dialog { width: min(640px, 100vw); max-width: 100vw; max-height: 100dvh; border: 0; border-radius: 14px;
+  padding: 16px; background: var(--card); color: var(--text); }
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+@media (max-width: 640px) {
+  dialog { width: 100vw; height: 100dvh; margin: 0; border-radius: 0; }
+}
+.seg { display: flex; gap: 4px; margin: 8px 0; flex-wrap: wrap; }
+.seg button { flex: 1; padding: 8px 6px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--card); color: var(--text); font-size: .9rem; }
+.seg button.active { border-color: var(--primary); color: var(--primary); font-weight: 700; }
+#map { width: 100%; height: 340px; border-radius: 10px; background: var(--border); }
+@media (max-width: 640px) { #map { height: 50dvh; } }
+.found { background: var(--ok-bg); color: var(--ok); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.found.approx { background: var(--warn-bg); color: var(--warn); }
+.dialog-actions { display: flex; gap: 8px; margin-top: 12px; }
+.dialog-actions > * { flex: 1; margin-top: 0; }
+details.entrance-result { border: 1px solid var(--border); border-radius: 12px; margin: 12px 0; background: var(--card); }
+details.entrance-result > summary { padding: 12px 14px; cursor: pointer; font-weight: 600; }
+details.entrance-result > .body { padding: 0 10px 4px; }

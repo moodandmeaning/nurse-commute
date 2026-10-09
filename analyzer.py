@@ -166,21 +166,66 @@ def sample_window(client, apartment, hospital, key, start, settings, tz):
 
 
 # ---- main entry point ------------------------------------------------------
-def analyze(client, apartment, hospital, settings, now=None):
-    apartment, hospital = (apartment or "").strip(), (hospital or "").strip()
+# Errors that concern the apartment or the API itself, not a specific entrance.
+GLOBAL_ERRORS = {"address_not_found", "no_api_key", "auth", "quota", "network", "missing_input"}
+
+
+def analyze(client, apartment, entrances, settings, now=None):
+    """Analyze the apartment against every hospital entrance; the verdict uses the best entrance."""
+    apartment = (apartment or "").strip()
     if not apartment:
         raise RoutesError("יש להזין כתובת דירה.", "missing_input")
-    if not hospital:
-        raise RoutesError("יש לבחור בית חולים.", "missing_input")
+    if not entrances:
+        raise RoutesError("יש להגדיר לפחות כניסה אחת לבית החולים.", "missing_input")
 
+    per_entrance = []
+    for e in entrances:
+        item = {"entrance": {k: e.get(k) for k in ("id", "label", "lat", "lng", "main")}}
+        try:
+            item["result"] = analyze_destination(client, apartment, {"lat": e["lat"], "lng": e["lng"]},
+                                                 settings, now)
+        except RoutesError as err:
+            if err.code in GLOBAL_ERRORS:
+                raise
+            item["error"] = err.message_he
+        per_entrance.append(item)
+
+    ok = [i for i in per_entrance if "result" in i]
+    if not ok:
+        raise RoutesError("לא נמצא מסלול הליכה לאף כניסה. ייתכן שכתובת הדירה לא נמצאה; כדאי להוסיף שם עיר.",
+                          "address_not_found")
+
+    best = min(ok, key=lambda i: (not i["result"]["suitable"], i["result"]["best_minutes"]))
+    r = best["result"]
+    verdict = r["verdict"]
+    if len(entrances) > 1:
+        verdict += f" (דרך {best['entrance']['label']})"
+    return {
+        "apartment": apartment,
+        "entrances": per_entrance,
+        "best_entrance_id": best["entrance"]["id"],
+        "best_entrance_label": best["entrance"]["label"],
+        "suitable": r["suitable"],
+        "verdict": verdict,
+        "best_minutes": r["best_minutes"],
+        "max_walk_minutes": settings["max_walk_minutes"],
+        "dates": r["dates"],
+        "day_labels": DAY_LABELS,
+        "windows": r["windows"],
+        "warning": WALK_WARNING,
+    }
+
+
+def analyze_destination(client, apartment, destination, settings, now=None):
+    """Full analysis to one destination (address string or {"lat", "lng"})."""
+    hospital = destination
     tz = ZoneInfo(settings["timezone"])
     now = now or datetime.now(tz)
 
     # A. walking
     walk_resp = client.walk(apartment, hospital)
     if not walk_resp.get("routes"):
-        raise RoutesError("לא נמצא מסלול הליכה. ייתכן שהכתובת לא נמצאה; כדאי להוסיף שם עיר.",
-                          "address_not_found")
+        raise RoutesError("לא נמצא מסלול הליכה לכניסה הזו.", "no_walk_route")
     w = walk_resp["routes"][0]
     walk_min = minutes_up(seconds(w.get("duration")))
     walk = {
@@ -237,10 +282,7 @@ def analyze(client, apartment, hospital, settings, now=None):
 
     best_minutes = min([walk_min] + [o["total_min"] for o in options])
     return {
-        "apartment": apartment,
-        "hospital": hospital,
         "walk": walk,
-        "max_walk_minutes": settings["max_walk_minutes"],
         "options": options,
         "transit_message": transit_message,
         "suitable": suitable,
