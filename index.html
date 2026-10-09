@@ -2,20 +2,33 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>מרחק לבית החולים</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>דרך לעבודה</title>
+  <meta name="description" content="כמה קל להגיע מדירה לבית החולים: הליכה, קווים ישירים ותדירות">
+  <meta name="theme-color" content="#1f6feb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="דרך לעבודה">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <main>
   <h1>🏥 כמה קל להגיע לעבודה?</h1>
-  <p class="sub">
-    הקריטריונים: הליכה עד {{ settings.max_walk_minutes }} דק',
-    או קו {{ 'ישיר (בלי החלפות)' if settings.direct_only else 'תחבורה ציבורית' }}
-    עד {{ settings.max_transit_minutes }} דק' עם יציאה לפחות כל {{ settings.max_gap_minutes }} דק'
-    בכל החלונות ({% for w in settings.windows %}{{ w.label }} {{ w.time }}{{ ', ' if not loop.last }}{% endfor %}).
-    <span class="muted">אפשר לשנות ב-settings.json</span>
-  </p>
+  <p class="sub" id="criteria"></p>
+
+  <section class="card" id="key-section" hidden>
+    <h2>🔑 מפתח Google API</h2>
+    <p class="muted">צריך להדביק אותו פעם אחת בכל מכשיר. הוא נשמר רק במכשיר הזה ונשלח רק ל-Google.</p>
+    <div class="inline">
+      <input id="api-key" dir="ltr" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="AIza...">
+      <button type="button" class="secondary" id="key-save">שמירה</button>
+    </div>
+    <div id="key-error"></div>
+  </section>
 
   <section class="card" id="hospital-section">
     <h2>🏥 בית החולים והכניסות</h2>
@@ -84,7 +97,30 @@
   </section>
 
   <p class="warning">⚠️ זמן ההליכה מחושב לכתובת הרשמית של בית החולים. כדאי לבדוק איפה נמצאת כניסת הצוות.</p>
+
+  <details class="settings">
+    <summary>⚙️ הגדרות ונתונים</summary>
+    <div class="settings-body">
+      <div class="row-actions">
+        <span id="key-status" class="muted"></span>
+        <button type="button" class="link-btn" id="key-change">החלפת מפתח</button>
+      </div>
+      <div class="row-actions">
+        <span class="muted">גיבוי הכניסות לקובץ JSON (גם להעברה למכשיר אחר)</span>
+        <span>
+          <button type="button" class="link-btn" id="entrances-export">⬇️ ייצוא</button>
+          <label class="link-btn file-label">⬆️ ייבוא<input type="file" id="entrances-import" accept=".json,application/json" hidden></label>
+        </span>
+      </div>
+      <div class="row-actions">
+        <span class="muted">תוצאות שמורות במכשיר כדי לחסוך קריאות ל-Google</span>
+        <button type="button" class="link-btn" id="cache-clear">ניקוי מטמון</button>
+      </div>
+      <p class="muted">הקריטריונים נקבעים בקובץ settings.json בפרויקט.</p>
+    </div>
+  </details>
 </main>
+
 <dialog id="entrance-dialog">
   <form id="entrance-form">
     <h2 id="editor-title">כניסה חדשה</h2>
@@ -109,9 +145,10 @@
     </div>
     <div class="panel" data-panel="paste">
       <div class="inline">
-        <input id="ent-paste" dir="ltr" placeholder="32.0461, 34.8516  או  https://maps.app.goo.gl/...">
+        <input id="ent-paste" dir="ltr" placeholder="32.0461, 34.8516  או  https://www.google.com/maps/...">
         <button type="button" class="secondary" id="ent-paste-go">זיהוי</button>
       </div>
+      <p class="muted">טיפ: בגוגל מפות, לחיצה ארוכה על המקום מציגה את הקואורדינטות למעלה. אפשר להעתיק ולהדביק אותן כאן.</p>
     </div>
     <div id="ent-found"></div>
     <div id="ent-error"></div>
@@ -121,7 +158,6 @@
     </div>
   </form>
 </dialog>
-<script>window.MAPS_BROWSER_KEY = {{ maps_browser_key | tojson }};</script>
-<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script type="module" src="js/app.js"></script>
 </body>
 </html>

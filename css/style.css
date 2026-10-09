@@ -63,7 +63,7 @@ a { color: var(--primary); }
 /* ---- entrances ---- */
 .entrances { list-style: none; padding: 0; margin: 8px 0; }
 .entrance { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
-.entrance .coords { direction: ltr; unicode-bidi: isolate; font-variant-numeric: tabular-nums; }
+.coords { direction: ltr; unicode-bidi: isolate; font-variant-numeric: tabular-nums; }
 .entrance .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .link-btn { background: none; border: 0; padding: 4px 0; color: var(--primary); font-weight: 600; }
 .link-btn.danger { color: var(--bad); }
@@ -88,3 +88,11 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 details.entrance-result { border: 1px solid var(--border); border-radius: 12px; margin: 12px 0; background: var(--card); }
 details.entrance-result > summary { padding: 12px 14px; cursor: pointer; font-weight: 600; }
 details.entrance-result > .body { padding: 0 10px 4px; }
+
+/* ---- settings / key ---- */
+details.settings { margin-top: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+details.settings > summary { padding: 12px 14px; cursor: pointer; font-weight: 600; }
+.settings-body { padding: 0 14px 10px; }
+.settings-body .row-actions { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.file-label { cursor: pointer; display: inline-block; }
+body { padding-bottom: env(safe-area-inset-bottom); }

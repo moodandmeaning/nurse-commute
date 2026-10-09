@@ -1,4 +1,9 @@
-"use strict";
+import { analyze } from "./analyzer.js";
+import { cacheClear } from "./cache.js";
+import { decodeBytes, exportCsv, readApartments } from "./csv.js";
+import { resolveLocation, validateState } from "./locations.js";
+import { loadMaps, MAPS_AUTH_ERROR, onMapsAuthFailure } from "./maps.js";
+import { RoutesClient, RoutesError } from "./routes.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -7,71 +12,81 @@ const safeUrl = (u) => (/^https?:\/\//i.test(u || "") ? u : "");
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `e${Date.now()}${Math.random().toString(16).slice(2)}`);
 const fmtCoord = (e) => `${Number(e.lat).toFixed(6)}, ${Number(e.lng).toFixed(6)}`;
 const mapsLink = (e) => `https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}`;
+const errMsg = (e) => (e instanceof RoutesError ? e.messageHe : "שגיאה לא צפויה. כדאי לנסות שוב.");
 
-async function postJson(url, body, method = "POST") {
-  let res;
-  try {
-    res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  } catch (e) {
-    return { error: "אין חיבור לשרת של האפליקציה." };
-  }
-  try { return await res.json(); } catch (e) { return { error: "שגיאה לא צפויה בשרת." }; }
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } },
+};
+
+function download(text, filename, type) {
+  const a = Object.assign(document.createElement("a"),
+    { href: URL.createObjectURL(new Blob([text], { type })), download: filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+let settings = null;
+
 // =====================================================================
-// Entrances: state saved in localStorage AND data/entrances.json (newest wins)
+// API key: pasted once per device, kept in localStorage only
+// =====================================================================
+const KEY_STORE = "nurse-commute:api-key";
+const apiKey = () => (store.get(KEY_STORE) || "").trim();
+const makeClient = () => new RoutesClient({ apiKey: apiKey(), settings });
+
+function renderKey() {
+  const has = Boolean(apiKey());
+  $("key-section").hidden = has;
+  $("key-status").textContent = has ? `🔑 מפתח שמור במכשיר (…${apiKey().slice(-4)})` : "🔑 אין מפתח שמור";
+}
+
+$("key-save").addEventListener("click", () => {
+  const k = $("api-key").value.trim();
+  if (!/^AIza[\w-]{30,}$/.test(k)) {
+    $("key-error").innerHTML = `<div class="error">זה לא נראה כמו מפתח של Google (מתחיל ב-AIza).</div>`;
+    return;
+  }
+  store.set(KEY_STORE, k);
+  location.reload(); // the map script is loaded with the key, so start fresh
+});
+
+$("key-change").addEventListener("click", () => {
+  $("key-section").hidden = false;
+  $("api-key").value = "";
+  $("key-section").scrollIntoView({ behavior: "smooth" });
+  $("api-key").focus();
+});
+
+$("cache-clear").addEventListener("click", async () => {
+  await cacheClear();
+  $("cache-clear").textContent = "נוקה ✓";
+});
+
+// =====================================================================
+// Entrances: saved in localStorage; export/import as a JSON file
 // =====================================================================
 const STORE_KEY = "nurse-commute:entrances";
-const OLD_HOSPITAL_KEY = "nurse-commute:hospital"; // from the first version of the app
 let state = { updated_at: 0, hospital: "", entrances: [] };
 
 function readLocal() {
   try {
-    const s = JSON.parse(localStorage.getItem(STORE_KEY));
-    return s && Array.isArray(s.entrances) ? s : null;
+    return validateState(JSON.parse(store.get(STORE_KEY)));
   } catch (e) { return null; }
 }
-function writeLocal() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
-}
-function setStatus(text) { $("entrance-status").textContent = text; }
 
-async function pushServer() {
-  const r = await postJson("/api/entrances", state, "PUT");
-  setStatus(r.error ? "⚠️ השמירה לקובץ נכשלה (נשמר בדפדפן)" : "נשמר ✓");
-}
+function setStatus(text) { $("entrance-status").textContent = text; }
 
 function commit() {
   state.updated_at = Date.now();
-  writeLocal();
+  setStatus(store.set(STORE_KEY, JSON.stringify(state)) ? "נשמר ✓" : "⚠️ השמירה במכשיר נכשלה");
   renderEntrances();
-  pushServer();
-}
-
-async function initEntrances() {
-  const local = readLocal();
-  if (local) state = local;
-  renderEntrances();
-  try {
-    const server = await (await fetch("/api/entrances")).json();
-    if ((server.updated_at || 0) > (state.updated_at || 0)) {
-      state = server; writeLocal(); renderEntrances();
-    } else if ((state.updated_at || 0) > (server.updated_at || 0)) {
-      pushServer();
-    }
-  } catch (e) {
-    setStatus("⚠️ לא הצלחתי לטעון מהקובץ, מוצגות הכניסות מהדפדפן");
-  }
-  if (!state.entrances.length) {
-    let old = "";
-    try { old = localStorage.getItem(OLD_HOSPITAL_KEY) || ""; } catch (e) {}
-    $("hospital").value = state.hospital || old;
-  }
 }
 
 function renderEntrances() {
   const list = state.entrances;
   $("hospital-setup").hidden = list.length > 0;
+  if (!list.length) $("hospital").value = state.hospital || "";
   $("entrance-list").innerHTML = list.map((e) => `
     <li class="entrance">
       <div><b>${e.main ? "⭐ " : "🚪 "}${esc(e.label)}</b>${e.main ? ` <span class="muted">(כניסה ראשית)</span>` : ""}</div>
@@ -103,25 +118,46 @@ $("hospital-save").addEventListener("click", async () => {
   if (!text) { out.innerHTML = `<div class="error">יש להזין שם או כתובת של בית החולים.</div>`; return; }
   const btn = $("hospital-save");
   btn.disabled = true; out.innerHTML = "";
-  const r = await postJson("/api/resolve-location", { text });
-  btn.disabled = false;
-  if (r.error) { out.innerHTML = `<div class="error">${esc(r.error)}</div>`; return; }
-  state.hospital = text;
-  const main = { id: newId(), label: "כניסה ראשית", main: true, lat: r.lat, lng: r.lng,
-                 address: r.address, input: text, source: r.source };
-  state.entrances = [main, ...state.entrances];
-  try { localStorage.setItem(OLD_HOSPITAL_KEY, text); } catch (e) {}
-  commit();
-  if (r.approximate) setStatus("⚠️ המיקום משוער. כדאי לבדוק ולדייק בעריכה ← סיכה במפה");
+  try {
+    const r = await resolveLocation(text, makeClient());
+    state.hospital = text;
+    state.entrances = [{ id: newId(), label: "כניסה ראשית", main: true, lat: r.lat, lng: r.lng,
+                         address: r.address, input: text, source: r.source }, ...state.entrances];
+    commit();
+    if (r.approximate) setStatus("⚠️ המיקום משוער. כדאי לבדוק ולדייק בעריכה ← סיכה במפה");
+  } catch (e) {
+    out.innerHTML = `<div class="error">${esc(errMsg(e))}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 $("add-entrance").addEventListener("click", () => openEditor(null));
 
+$("entrances-export").addEventListener("click", () => {
+  download(JSON.stringify(state, null, 2), "hospital-entrances.json", "application/json");
+});
+
+$("entrances-import").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = "";
+  if (!file) return;
+  try {
+    const imported = validateState(JSON.parse(decodeBytes(await file.arrayBuffer())));
+    if (state.entrances.length && !confirm(`להחליף את ${state.entrances.length} הכניסות הקיימות ב-${imported.entrances.length} כניסות מהקובץ?`)) return;
+    state = imported;
+    commit();
+    setStatus(`יובאו ${state.entrances.length} כניסות ✓`);
+  } catch (e) {
+    setStatus("⚠️ הקובץ אינו קובץ כניסות תקין");
+  }
+});
+
 // =====================================================================
 // Entrance editor (dialog): address/description, map pin, coordinates/link
 // =====================================================================
-let editing = null;   // entrance being edited, or null for a new one
-let draft = null;     // {lat, lng, address, source, input, approximate}
+let editing = null; // entrance being edited, or null for a new one
+let draft = null;   // {lat, lng, address, source, input, approximate}
 let mode = "address";
 
 function openEditor(entrance) {
@@ -144,6 +180,7 @@ function setMode(m) {
   document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
   document.querySelectorAll("[data-panel]").forEach((p) => { p.hidden = p.dataset.panel !== m; });
   if (m === "map") showMap();
+  renderDraft();
 }
 document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
 
@@ -166,11 +203,15 @@ async function resolveInto(text, btn) {
   $("ent-error").innerHTML = "";
   if (!text.trim()) { $("ent-error").innerHTML = `<div class="error">יש להזין ערך לחיפוש.</div>`; return; }
   btn.disabled = true;
-  const r = await postJson("/api/resolve-location", { text });
-  btn.disabled = false;
-  if (r.error) { $("ent-error").innerHTML = `<div class="error">${esc(r.error)}</div>`; return; }
-  draft = { lat: r.lat, lng: r.lng, address: r.address, source: r.source, input: text.trim(), approximate: r.approximate };
-  renderDraft();
+  try {
+    const r = await resolveLocation(text, makeClient());
+    draft = { lat: r.lat, lng: r.lng, address: r.address, source: r.source, input: text.trim(), approximate: r.approximate };
+    renderDraft();
+  } catch (e) {
+    $("ent-error").innerHTML = `<div class="error">${esc(errMsg(e))}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
 }
 $("ent-address-go").addEventListener("click", (ev) => resolveInto($("ent-address").value, ev.currentTarget));
 $("ent-paste-go").addEventListener("click", (ev) => resolveInto($("ent-paste").value, ev.currentTarget));
@@ -193,39 +234,22 @@ $("entrance-form").addEventListener("submit", (ev) => {
   commit();
 });
 
-// ---- Google Maps JavaScript API (loaded only when the map is opened) -------
-let mapsPromise = null, map = null, marker = null, refMarkers = [];
-
-function loadMaps() {
-  if (!window.MAPS_BROWSER_KEY) return Promise.reject(new Error("no-key"));
-  if (!mapsPromise) {
-    mapsPromise = new Promise((resolve, reject) => {
-      window.__mapsReady = resolve;
-      window.gm_authFailure = () => showMapError(
-        "Google דחה את מפתח המפה. יש לוודא שה-Maps JavaScript API מופעל ושהמפתח מתיר את הכתובת הזו (ראו README).");
-      const s = document.createElement("script");
-      s.src = "https://maps.googleapis.com/maps/api/js?key=" + encodeURIComponent(window.MAPS_BROWSER_KEY) +
-              "&language=he&region=IL&loading=async&callback=__mapsReady";
-      s.async = true;
-      s.onerror = () => { mapsPromise = null; reject(new Error("load")); };
-      document.head.appendChild(s);
-    }).then(() => Promise.all([google.maps.importLibrary("maps"), google.maps.importLibrary("marker")]));
-  }
-  return mapsPromise;
-}
+// ---- map (Google Maps JavaScript API, loaded on first use) ----------------
+let map = null, marker = null, refMarkers = [];
 
 function showMapError(msg) {
   $("map").innerHTML = `<div class="error">${esc(msg)}</div>`;
   map = null; marker = null;
 }
+onMapsAuthFailure(() => showMapError(MAPS_AUTH_ERROR));
 
 async function showMap() {
   try {
-    await loadMaps();
+    await loadMaps(apiKey(), settings.language_code, settings.region_code);
   } catch (e) {
     showMapError(e.message === "no-key"
-      ? "כדי להשתמש במפה צריך מפתח API בקובץ ‎.env (ראו README). אפשר בינתיים להדביק קואורדינטות."
-      : "לא הצלחתי לטעון את Google Maps. יש לבדוק את החיבור לאינטרנט.");
+      ? "כדי להשתמש במפה צריך להדביק מפתח Google API (🔑 בראש העמוד). אפשר בינתיים להדביק קואורדינטות."
+      : e.message === "auth" ? MAPS_AUTH_ERROR : "לא הצלחתי לטעון את Google Maps. יש לבדוק את החיבור לאינטרנט.");
     return;
   }
   const others = state.entrances.filter((e) => !editing || e.id !== editing.id);
@@ -273,7 +297,16 @@ function entrancesOrError(target) {
   return null;
 }
 
-const checkAddress = (address, entrances) => postJson("/api/check", { address, entrances });
+async function checkAddress(address, entrances) {
+  const client = makeClient();
+  try {
+    const r = await analyze(client, address, entrances, settings);
+    return { ...r, api_calls: client.apiCalls, cache_hits: client.cacheHits };
+  } catch (e) {
+    if (!(e instanceof RoutesError)) console.error(e);
+    return { error: errMsg(e) };
+  }
+}
 
 // =====================================================================
 // Single address
@@ -284,7 +317,7 @@ $("single-form").addEventListener("submit", async (ev) => {
   const entrances = entrancesOrError(out);
   if (!entrances) return;
   const btn = ev.submitter || ev.target.querySelector("button");
-  btn.disabled = true; btn.textContent = "בבדיקה… (יכול לקחת כחצי דקה לכל כניסה)";
+  btn.disabled = true; btn.textContent = "בבדיקה… (יכול לקחת עד חצי דקה)";
   out.innerHTML = "";
   const r = await checkAddress($("address").value.trim(), entrances);
   btn.disabled = false; btn.textContent = "בדיקה";
@@ -304,7 +337,7 @@ function renderResult(r) {
       <div class="body">${res ? renderDestination(res, r) : `<div class="error">${esc(item.error)}</div>`}</div>
     </details>`;
   }
-  html += `<p class="muted">קריאות API: ${r.api_calls} · מהמטמון: ${r.cache_hits}</p>`;
+  html += `<p class="muted">קריאות ל-Google: ${r.api_calls} · מהמטמון: ${r.cache_hits}</p>`;
   return html;
 }
 
@@ -372,10 +405,9 @@ $("csv-form").addEventListener("submit", async (ev) => {
   if (!file) return;
   out.innerHTML = ""; prog.innerHTML = "";
 
-  const fd = new FormData(); fd.append("file", file);
   let parsed;
-  try { parsed = await (await fetch("/api/csv/parse", { method: "POST", body: fd })).json(); }
-  catch (e) { parsed = { error: "שגיאה בהעלאת הקובץ." }; }
+  try { parsed = readApartments(decodeBytes(await file.arrayBuffer())); }
+  catch (e) { parsed = { error: "לא הצלחתי לקרוא את הקובץ." }; }
   if (parsed.error) { out.innerHTML = `<div class="error">${esc(parsed.error)}</div>`; return; }
 
   const btn = ev.submitter || ev.target.querySelector("button");
@@ -436,19 +468,32 @@ function renderCsvTable() {
           <td title="${esc(r.verdict)}">${mark}${r.suitable === null ? `<div class="muted">${esc(r.verdict)}</div>` : ""}</td></tr>`;
       }).join("")}</tbody>
     </table></div></div>`;
-  $("csv-download").addEventListener("click", downloadCsv);
+  $("csv-download").addEventListener("click", () =>
+    download(exportCsv(sortedResults()), "apartments_results.csv", "text/csv;charset=utf-8"));
 }
 
-async function downloadCsv() {
-  const res = await fetch("/api/csv/export", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rows: sortedResults() }),
-  });
-  const blob = await res.blob();
-  const a = Object.assign(document.createElement("a"),
-    { href: URL.createObjectURL(blob), download: "apartments_results.csv" });
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+// =====================================================================
+// Start
+// =====================================================================
+function renderCriteria() {
+  const s = settings;
+  $("criteria").innerHTML = `הקריטריונים: הליכה עד ${s.max_walk_minutes} דק', או קו ${s.direct_only ? "ישיר (בלי החלפות)" : "תחבורה ציבורית"}
+    עד ${s.max_transit_minutes} דק' עם יציאה לפחות כל ${s.max_gap_minutes} דק' בכל החלונות
+    (${s.windows.map((w) => `${esc(w.label)} ${esc(w.time)}`).join(", ")}).`;
 }
 
-initEntrances();
+async function init() {
+  try {
+    settings = await (await fetch("settings.json", { cache: "no-cache" })).json();
+  } catch (e) {
+    document.querySelector("main").insertAdjacentHTML("afterbegin",
+      `<div class="error">לא הצלחתי לטעון את ההגדרות. יש לבדוק את החיבור לאינטרנט ולרענן.</div>`);
+    return;
+  }
+  renderCriteria();
+  renderKey();
+  state = readLocal() || state;
+  renderEntrances();
+}
+
+init();

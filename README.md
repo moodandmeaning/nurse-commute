@@ -1,17 +1,19 @@
 # Nurse Commute 🏥
 
-A small Flask web app with a Hebrew, RTL, mobile-friendly UI. It checks how easy it is to get from a rental apartment to a hospital:
+**Open the app: https://moodandmeaning.github.io/nurse-commute/**
+
+A Hebrew, RTL, mobile-friendly web app that checks how easy it is to get from a rental apartment to a hospital. It runs entirely in your browser (hosted free on GitHub Pages) and talks directly to Google. There is no server, and nothing is stored anywhere except on your own device.
 
 - **Hospital entrances**: type the hospital once (it becomes the *main entrance*), then add as many entrances as you like (e.g. "Staff entrance") by address/description, by dropping a pin on a map, or by pasting coordinates / a Google Maps link. Edit, rename or delete any of them. Every entrance is checked, and the verdict uses the best one.
 - **Walking** time and distance (marked "suitable for walking" at ≤ 8 min)
 - **Direct public transit lines only** (exactly one transit leg, no transfers), with line, operator, stops, walk to the stop and total time
 - **Frequency** per line in 4 windows (06:00, 14:00, 22:00, 03:00), on the next weekday (Sun–Thu) and on Saturday: up to 4 consecutive departures, average gap
 - **Verdict**: suitable if walking ≤ 8 min, OR a direct line ≤ 15 min with a departure at least every 20 min in all four windows
-- **CSV mode**: upload `address,price,link`, get a sorted table with suitable/not suitable marking, download it as CSV
+- **CSV mode**: upload `address,price,link`, get a table sorted by travel time with suitable/not suitable marking, download it as CSV
 
-Data comes from the Google **Routes API** (`computeRoutes`, `WALK` + `TRANSIT`), the **Geocoding API** (turning hospital names / entrance descriptions into coordinates) and the **Maps JavaScript API** (the pin-drop map).
+Data comes from Google: the **Routes API** (`computeRoutes`, `WALK` + `TRANSIT`), the **Geocoding API** (via the Maps JavaScript geocoder) and the **Maps JavaScript API** (the pin-drop map).
 
-## 1. Get an API key
+## 1. Get a Google API key
 
 1. Go to <https://console.cloud.google.com/> and create a project (or pick an existing one).
 2. Enable billing for the project (Google requires it, and the free monthly credit covers personal use).
@@ -20,45 +22,36 @@ Data comes from the Google **Routes API** (`computeRoutes`, `WALK` + `TRANSIT`),
    - **Geocoding API**
    - **Maps JavaScript API**
 4. Open **APIs & Services → Credentials → Create credentials → API key**.
-5. Recommended: click the key → **API restrictions → Restrict key** → select the three APIs above.
-6. Copy `.env.example` to `.env` and paste the key:
-   ```
-   GOOGLE_MAPS_API_KEY=AIza...
-   ```
-   `.env` is in `.gitignore` and is never committed.
+5. **Restrict the key.** It's used from a public web page, so this matters. Click the key, then:
+   - **Application restrictions → Websites**, add:
+     - `https://moodandmeaning.github.io/*`
+     - `http://127.0.0.1:8000/*` (only if you run it locally, see below)
+   - **API restrictions → Restrict key** → select Routes API, Geocoding API, Maps JavaScript API.
+   - Save. It can take a few minutes to apply.
 
-**Map key (optional but recommended).** The pin-drop map runs in your browser, so its key is visible in the page source. If `GOOGLE_MAPS_BROWSER_KEY` isn't set, the app reuses `GOOGLE_MAPS_API_KEY`. That's fine while the app only runs on your own computer. For extra safety, create a second key restricted to **Maps JavaScript API** with an **HTTP referrer** restriction of `http://127.0.0.1:5000/*` and `http://localhost:5000/*`, and put it in `.env`:
-```
-GOOGLE_MAPS_BROWSER_KEY=AIza...
-```
+## 2. Use it on your phone
 
-## 2. Run
+1. Open **https://moodandmeaning.github.io/nurse-commute/**.
+2. Paste your API key in the 🔑 box. It's saved **only on that device** (browser storage) and only sent to Google. The key is never in this repository.
+3. Add it to your home screen:
+   - **iPhone (Safari):** Share button → *Add to Home Screen*.
+   - **Android (Chrome):** ⋮ menu → *Add to Home screen* / *Install app*.
 
-```powershell
-python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python app.py
-```
-Open <http://127.0.0.1:5000> (on your phone, run with `--host` on your LAN, or just use the desktop browser's mobile view).
-
-Tests (no API key needed, they use a fake Routes client):
-```powershell
-.venv\Scripts\python -m pytest -q
-```
+Each device (phone, computer) needs the key pasted once.
 
 ## 3. Hospital entrances
 
-- The first time, type the hospital name or address and click **save as main entrance**. The app finds its coordinates.
+- The first time, type the hospital name or address and tap **save as main entrance**.
 - **➕ Add entrance**: give it a name (e.g. "Staff entrance") and set its location in one of three ways:
-  - **Address / description**: e.g. `שיבא כניסה מזרחית`. If Google's match is only approximate, you'll be told so and can fix it on the map.
-  - **Map pin**: click the map (satellite view helps) and drag the pin. Other entrances are shown faded for reference.
-  - **Coordinates / link**: `32.0461, 34.8516`, or any Google Maps link, including short `maps.app.goo.gl/...` links (the server follows their redirect, and only to Google domains). Waze `ll=` links work too.
-- Every entrance is stored as lat/lng, in the browser (localStorage) and in `data/entrances.json`. When the app opens, the newer of the two is used, so your entrances are always there. `data/` is in `.gitignore` because it's personal location data.
-- Each apartment check runs the full analysis for every entrance (more entrances = more API calls the first time; results are cached).
+  - **Address / description**: e.g. `שיבא כניסה מזרחית`. If Google's match is approximate you'll be told so, and can fix it on the map.
+  - **Map pin**: tap the map (satellite view helps) and drag the pin. Other entrances are shown faded for reference.
+  - **Coordinates / link**: `32.0461, 34.8516`, a full Google Maps link, or a Waze `ll=` link. Short `maps.app.goo.gl` links can't be read from a web page. Instead, long-press the spot in Google Maps and copy the coordinates shown at the top.
+- Entrances are stored as lat/lng on the device and are there every time you open the app.
+- **⚙️ Settings → Export / Import** saves them to a JSON file. Use it as a backup, or to move them to another device.
 
 ## 4. Settings: `settings.json`
 
-Changes take effect on the next check, with no restart needed.
+The criteria live in `settings.json` in this repository. Edit and push it, and the app picks it up on the next load.
 
 | key | meaning | default |
 |---|---|---|
@@ -72,16 +65,25 @@ Changes take effect on the next check, with no restart needed.
 | `windows` | time windows to check | 06:00, 14:00, 22:00, 03:00 |
 | `window_length_minutes` | only departures within this many minutes of the window start count | 60 |
 | `departures_per_window` | consecutive departures to sample | 4 |
-| `weekdays` | which days count as a "weekday" (Python: Mon=0 … Sun=6) | Sun–Thu |
+| `weekdays` | which days count as a "weekday" (Mon=0 … Sun=6) | Sun–Thu |
 | `verdict_days` | days that must pass for the verdict: `weekday`, `saturday` | `["weekday"]` |
 | `max_lines_for_frequency` | how many direct lines to sample (controls API usage) | 3 |
-| `cache_ttl_hours` | how long API responses are cached in `cache/` | 168 |
+| `cache_ttl_hours` | how long Google responses are cached on the device | 168 |
 
 Saturday frequency is always shown. Add `"saturday"` to `verdict_days` if you work Shabbat shifts and need transit then. Note that most Israeli lines don't run on Shabbat.
 
 ## 5. How frequency is measured
 
-For each line and window, the app calls `computeRoutes` (TRANSIT, `computeAlternativeRoutes: true`) at the window start, takes that line's departure, then calls again one minute after that trip's leave-home time, up to 4 departures. Departures that already appear among the alternatives are reused, and every response is cached on disk. A first check of an address costs roughly 8–60 API calls per entrance; repeat checks are free.
+For each line and window, the app calls `computeRoutes` (TRANSIT, `computeAlternativeRoutes: true`) at the window start and takes that line's departure. It then calls again one minute after that trip's leave-home time, up to 4 departures. Departures already in the alternatives are reused, identical requests are shared, and every response is cached on the device (IndexedDB). A first check of an address costs roughly 10–40 API calls per entrance; repeat checks are free (⚙️ → *clear cache* resets this).
+
+## 6. Run locally / tests
+
+The app is plain HTML + JavaScript modules, so it needs a local web server (opening `index.html` directly won't work):
+
+```powershell
+python -m http.server 8000 --bind 127.0.0.1
+```
+Then open <http://127.0.0.1:8000/>. The tests run in the browser at <http://127.0.0.1:8000/tests/>. They use a fake Google client, so no key is needed.
 
 ## Caveats
 
